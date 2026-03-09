@@ -3,7 +3,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
-from app.agent import agent
+from app.agent import agent, get_llm_status
 from app.memory import get_recent_history, load_memory
 from app.models import ChatRequest, DailyLogInput
 from app.semantic_memory import add_semantic_memory, list_semantic_memories, query_semantic_memory
@@ -897,7 +897,11 @@ def about_page() -> HTMLResponse:
 
 @app.get("/health")
 def health_check() -> dict[str, Any]:
-    return {"status": "ok", "database_configured": is_database_configured()}
+    return {
+        "status": "ok",
+        "database_configured": is_database_configured(),
+        "llm": get_llm_status(),
+    }
 
 
 @app.post("/chat")
@@ -925,7 +929,10 @@ def chat(data: dict[str, Any]) -> dict[str, Any]:
         "history": history,
         "user_profile": request_model.user_profile,
     }
-    result = agent.invoke(state)
+    try:
+        result = agent.invoke(state)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Agent invocation failed: {exc}") from exc
     response = result.get("recommendation", "Focus on balanced habits.")
 
     upsert_user(request_model.user_id)

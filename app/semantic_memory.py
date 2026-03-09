@@ -1,6 +1,7 @@
 import hashlib
 import math
 import os
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,8 +62,18 @@ def _get_collection():
     if _collection is not None:
         return _collection
 
-    base_dir = Path(os.getenv("CHROMA_DIR", str(Path(__file__).resolve().parents[1] / "data" / "chroma")))
-    base_dir.mkdir(parents=True, exist_ok=True)
+    if os.getenv("CHROMA_DIR", "").strip():
+        base_dir = Path(os.getenv("CHROMA_DIR", ""))
+    elif os.getenv("VERCEL", "").strip() == "1":
+        base_dir = Path("/tmp/chroma")
+    else:
+        base_dir = Path(__file__).resolve().parents[1] / "data" / "chroma"
+
+    try:
+        base_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        base_dir = Path(tempfile.gettempdir()) / "life_optimizer_chroma"
+        base_dir.mkdir(parents=True, exist_ok=True)
 
     _client = chromadb.PersistentClient(
         path=str(base_dir),

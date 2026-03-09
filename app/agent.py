@@ -22,8 +22,11 @@ load_dotenv()
 
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
-OPENROUTER_HTTP_REFERER = os.getenv("OPENROUTER_HTTP_REFERER", "http://localhost:8001")
+OPENROUTER_API_KEY = (
+    os.getenv("OPENROUTER_API_KEY", "").strip()
+    or os.getenv("OPENAI_API_KEY", "").strip()
+)
+OPENROUTER_HTTP_REFERER = os.getenv("OPENROUTER_HTTP_REFERER", "").strip() or os.getenv("APP_URL", "").strip()
 OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "Life Optimizer AI")
 
 
@@ -31,19 +34,31 @@ def _build_llm() -> ChatOpenAI | None:
     if not OPENROUTER_API_KEY:
         return None
 
+    headers: dict[str, str] = {"X-Title": OPENROUTER_APP_NAME}
+    if OPENROUTER_HTTP_REFERER:
+        headers["HTTP-Referer"] = OPENROUTER_HTTP_REFERER
+
     return ChatOpenAI(
         model=OPENROUTER_MODEL,
         temperature=0.3,
         api_key=OPENROUTER_API_KEY,
         base_url=OPENROUTER_BASE_URL,
-        default_headers={
-            "HTTP-Referer": OPENROUTER_HTTP_REFERER,
-            "X-Title": OPENROUTER_APP_NAME,
-        },
+        default_headers=headers,
     )
 
 
 llm = _build_llm()
+
+
+def get_llm_status() -> dict[str, Any]:
+    return {
+        "provider": "openrouter",
+        "configured": llm is not None,
+        "model": OPENROUTER_MODEL,
+        "base_url": OPENROUTER_BASE_URL,
+        "has_http_referer": bool(OPENROUTER_HTTP_REFERER),
+        "using_key_env": "OPENROUTER_API_KEY" if os.getenv("OPENROUTER_API_KEY", "").strip() else ("OPENAI_API_KEY" if os.getenv("OPENAI_API_KEY", "").strip() else "none"),
+    }
 
 
 def memory_context_agent(state: AgentState) -> dict[str, Any]:
@@ -91,6 +106,19 @@ def health_agent(state: AgentState) -> dict[str, str]:
     action = state.get("action", "")
     if action == "mood_analysis":
         recommendation = analyze_mood(profile)
+    elif action == "general_advice" and llm is not None:
+        prompt = (
+            "You are a practical life coach. Give a short, specific recommendation in 2-4 sentences.\n"
+            f"User input: {state['user_input']}\n"
+            f"User profile: {profile}\n"
+            f"Memory context: {state.get('memory_context', 'none')}"
+        )
+        try:
+            response = llm.invoke(prompt)
+            content = response.content if isinstance(response.content, str) else str(response.content)
+            recommendation = content.strip() or "Focus on balanced habits."
+        except Exception:
+            recommendation = "Focus on balanced habits."
     else:
         recommendation = analyze_sleep(profile)
     return {
